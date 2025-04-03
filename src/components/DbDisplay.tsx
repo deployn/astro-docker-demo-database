@@ -1,11 +1,17 @@
-import React from "react";
+import React, { type FC } from "react";
+import type { Note } from "../types";
 
-const DbDisplay = ({ notes, dbType }) => {
+interface DbDisplayProps {
+  notes: Note[];
+  dbType: string; // "MySQL", "PostgreSQL"
+}
+
+const DbDisplay: FC<DbDisplayProps> = ({ notes, dbType }) => {
   return (
     <div className="note-container">
       {notes.length > 0 ? (
         notes.map((note) => (
-          <div className="note" key={note.id}>
+          <div className="note" key={`${dbType}-${note.id}`}>
             {note.content}
           </div>
         ))
