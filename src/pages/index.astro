@@ -1,16 +1,256 @@
 ---
+import pkg from "pg";
+const { Pool } = pkg;
+import mysql from "mysql2/promise";
+import DbDisplay from "../components/DbDisplay";
 
+// PostgreSQL Verbindung
+const pgPool = new Pool({
+  host: import.meta.env.POSTGRES_HOST || "postgres",
+  port: parseInt(import.meta.env.POSTGRES_PORT || "5432"),
+  user: import.meta.env.POSTGRES_USER || "demouser",
+  password: import.meta.env.POSTGRES_PASSWORD || "example",
+  database: import.meta.env.POSTGRES_DB || "demo",
+});
+
+// MySQL Verbindung
+const mysqlPool = await mysql.createPool({
+  host: import.meta.env.MYSQL_HOST || "mysql",
+  port: parseInt(import.meta.env.MYSQL_PORT || "3306"),
+  user: import.meta.env.MYSQL_USER || "demouser",
+  password: import.meta.env.MYSQL_PASSWORD || "demopass",
+  database: import.meta.env.MYSQL_DB || "demo",
+});
+
+// Tabellen erstellen, falls nicht vorhanden
+try {
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id SERIAL PRIMARY KEY,
+      content TEXT NOT NULL
+    )
+  `);
+
+  await mysqlPool.query(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      content TEXT NOT NULL
+    )
+  `);
+} catch (error) {
+  console.error("Fehler beim Erstellen der Tabellen:", error);
+}
+
+// Daten aus PostgreSQL abrufen
+let pgNotes = [];
+try {
+  const pgResult = await pgPool.query("SELECT id, content FROM notes");
+  pgNotes = pgResult.rows;
+} catch (error) {
+  console.error("PostgreSQL Fehler:", error);
+}
+
+// Daten aus MySQL abrufen
+let mysqlNotes = [];
+try {
+  const [rows] = await mysqlPool.query("SELECT id, content FROM notes");
+  mysqlNotes = rows;
+} catch (error) {
+  console.error("MySQL Fehler:", error);
+}
+
+// Formulardaten verarbeiten
+if (Astro.request.method === "POST") {
+  try {
+    const formData = await Astro.request.formData();
+    const content = formData.get("content")?.toString() || "";
+    const dbType = formData.get("db_type")?.toString() || "";
+    const action = formData.get("action")?.toString() || "add";
+
+    if (action === "add" && content) {
+      if (dbType === "mysql") {
+        await mysqlPool.query("INSERT INTO notes (content) VALUES (?)", [
+          content,
+        ]);
+      } else if (dbType === "postgres") {
+        await pgPool.query("INSERT INTO notes (content) VALUES ($1)", [
+          content,
+        ]);
+      }
+    } else if (action === "clear") {
+      if (dbType === "mysql") {
+        await mysqlPool.query("TRUNCATE TABLE notes");
+      } else if (dbType === "postgres") {
+        await pgPool.query("TRUNCATE TABLE notes");
+      }
+    }
+
+    // Seite neu laden, um aktuelle Daten anzuzeigen
+    return Astro.redirect("/");
+  } catch (error) {
+    console.error("Fehler bei der Formularbearbeitung:", error);
+  }
+}
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Datenbank Demo</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .db-section {
+        flex: 1;
+        background-color: white;
+        padding: 20px;
+        border-radius: 5px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      h2 {
+        color: #333;
+        margin-top: 0;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+      }
+      form {
+        margin-bottom: 20px;
+      }
+      input[type="text"] {
+        width: 70%;
+        padding: 8px;
+        margin-right: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      button {
+        padding: 8px 15px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      button.danger {
+        background-color: #f44336;
+      }
+      .note-container {
+        min-height: 200px;
+        max-height: 400px;
+        overflow-y: auto;
+        margin-top: 20px;
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 4px;
+      }
+      .note {
+        padding: 10px;
+        margin-bottom: 10px;
+        background-color: #f9f9f9;
+        border-radius: 4px;
+        border-left: 3px solid #4caf50;
+      }
+      .empty-message {
+        color: #999;
+        font-style: italic;
+        text-align: center;
+        margin-top: 50px;
+      }
+      .tools {
+        margin-top: 20px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .tools a {
+        text-decoration: none;
+        color: #2196f3;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Datenbank Demonstration</h1>
+
+    <div class="container">
+      <div class="db-section">
+        <h2>MySQL Datenbank (Version 8.4)</h2>
+        <form method="post">
+          <input
+            type="text"
+            name="content"
+            placeholder="Notiz eingeben..."
+            required
+          />
+          <input type="hidden" name="db_type" value="mysql" />
+          <input type="hidden" name="action" value="add" />
+          <button type="submit">Hinzufügen</button>
+        </form>
+
+        <div class="note-container">
+          {
+            mysqlNotes.length > 0 ? (
+              mysqlNotes.map((note) => <div class="note">{note.content}</div>)
+            ) : (
+              <div class="empty-message">Keine Daten in MySQL vorhanden</div>
+            )
+          }
+        </div>
+
+        <form method="post" style="margin-top: 20px;">
+          <input type="hidden" name="db_type" value="mysql" />
+          <input type="hidden" name="action" value="clear" />
+          <button type="submit" class="danger">Alle MySQL Daten löschen</button>
+        </form>
+      </div>
+
+      <div class="db-section">
+        <h2>PostgreSQL Datenbank (Version 17)</h2>
+        <form method="post">
+          <input
+            type="text"
+            name="content"
+            placeholder="Notiz eingeben..."
+            required
+          />
+          <input type="hidden" name="db_type" value="postgres" />
+          <input type="hidden" name="action" value="add" />
+          <button type="submit">Hinzufügen</button>
+        </form>
+
+        <div class="note-container">
+          {
+            pgNotes.length > 0 ? (
+              pgNotes.map((note) => <div class="note">{note.content}</div>)
+            ) : (
+              <div class="empty-message">
+                Keine Daten in PostgreSQL vorhanden
+              </div>
+            )
+          }
+        </div>
+
+        <form method="post" style="margin-top: 20px;">
+          <input type="hidden" name="db_type" value="postgres" />
+          <input type="hidden" name="action" value="clear" />
+          <button type="submit" class="danger"
+            >Alle PostgreSQL Daten löschen</button
+          >
+        </form>
+      </div>
+    </div>
+  </body>
 </html>
